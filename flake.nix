@@ -19,21 +19,9 @@
           builtins.trace "Applying allowMissingModulesOverlay" (super.makeModulesClosure (x // { allowMissing = true; }));
       };
 
-      # Overlay for customizing linuxManualConfig
-      linuxManualConfigOverlay = final: super: {
-        linuxManualConfig = super.linuxManualConfig.override {
-          stdenv = super.gcc10Stdenv;
-          buildPackages = super.buildPackages // {
-            stdenv = super.buildPackages.gcc10Stdenv;
-          };
-        };
-      };
-
-      # Import nixpkgs with both overlays
+      # Import nixpkgs for aarch64
       pkgs = import nixpkgs {
-        system = "x86_64-linux";
-        crossSystem.config = "aarch64-unknown-linux-gnu";
-        overlays = [ linuxManualConfigOverlay ];
+        system = "aarch64-linux";
       };
 
       linux_armbian = (pkgs.linuxManualConfig {
@@ -99,7 +87,6 @@
       iso_armbian = generateISO linux_armbian;
 
     in {
-
       packages.aarch64-linux = {
         iso_khadas = iso_khadas;
         iso_armbian = iso_armbian;
@@ -110,12 +97,11 @@
         linux_armbian = linux_armbian;
       };
 
-      devShells.x86_64-linux.default = linux_khadas.overrideAttrs (old: {
+      devShells.aarch64-linux.default = linux_khadas.overrideAttrs (old: {
         nativeBuildInputs = old.nativeBuildInputs ++ (with pkgs; [ ncurses pkg-config ]);
         shellHook = ''
           addToSearchPath PKG_CONFIG_PATH ${pkgs.buildPackages.ncurses.dev}/lib/pkgconfig
         '';
         });
-
     };
 }
