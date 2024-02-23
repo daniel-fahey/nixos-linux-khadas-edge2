@@ -1,31 +1,39 @@
 {
-
   inputs = {
-
-    nixpkgs.url = github:NixOS/nixpkgs/nixos-unstable;
-
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     rk3588-implicit-sync = {
-      url = gitlab:panfork/rk3588-implicit-sync;
+      url = "gitlab:panfork/rk3588-implicit-sync";
       flake = false;
     };
-
   };
 
-  outputs = inputs@{ self, nixpkgs, ... }: 
+  outputs = { self, nixpkgs, nixos-generators, ... }:
     let
+      # Overlay to allow missing modules
+      allowMissingModulesOverlay = final: super: {
+        makeModulesClosure = x:
+          builtins.trace "Applying allowMissingModulesOverlay" (super.makeModulesClosure (x // { allowMissing = true; }));
+      };
+
+      # Overlay for customizing linuxManualConfig
+      linuxManualConfigOverlay = final: super: {
+        linuxManualConfig = super.linuxManualConfig.override {
+          stdenv = super.gcc10Stdenv;
+          buildPackages = super.buildPackages // {
+            stdenv = super.buildPackages.gcc10Stdenv;
+          };
+        };
+      };
+
+      # Import nixpkgs with both overlays
       pkgs = import nixpkgs {
         system = "x86_64-linux";
         crossSystem.config = "aarch64-unknown-linux-gnu";
-        overlays = [
-          (self: super: {
-            linuxManualConfig = super.linuxManualConfig.override {
-              stdenv = super.gcc10Stdenv;
-              buildPackages = super.buildPackages // {
-                stdenv = super.buildPackages.gcc10Stdenv;
-              };
-            };
-          })
-        ];
+        overlays = [ linuxManualConfigOverlay ];
       };
 
       linux_armbian = (pkgs.linuxManualConfig {
@@ -68,7 +76,34 @@
         ]);
       });
 
+      generateISO = kernelPackage: let
+        aarch64Pkgs = import nixpkgs {
+          system = "aarch64-linux";
+          overlays = [ allowMissingModulesOverlay ];
+        };
+      in
+        nixos-generators.nixosGenerate {
+          system = "aarch64-linux";
+          pkgs = aarch64Pkgs;
+          format = "install-iso";
+          modules = [
+            ({ pkgs, ... }: {
+              boot.kernelPackages = pkgs.linuxPackagesFor kernelPackage;
+              services.openssh.enable = true;
+              # Include other desired NixOS configuration options here
+            })
+          ];
+        };
+
+      iso_khadas = generateISO linux_khadas;
+      iso_armbian = generateISO linux_armbian;
+
     in {
+
+      packages.aarch64-linux = {
+        iso_khadas = iso_khadas;
+        iso_armbian = iso_armbian;
+      };
 
       packages.x86_64-linux = {
         linux_khadas = linux_khadas;
